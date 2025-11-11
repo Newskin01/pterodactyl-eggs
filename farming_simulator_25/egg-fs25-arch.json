@@ -1,0 +1,142 @@
+{
+    "_comment": "Base FS25 egg definition tracked in this repository.",
+    "meta": {
+        "version": "PTDL_v2",
+        "update_url": null
+    },
+    "exported_at": "2025-11-08T19:03:30.958264+00:00",
+    "name": "Farming Simulator 25 (Arch)",
+    "author": "https://github.com/Newskin01",
+    "description": "Custom egg that wraps toetje585/arch-fs25server with media-aware install hooks, Cloudflare-ready web ports, and health reporting.",
+    "features": null,
+    "docker_images": {
+        "toetje585/arch-fs25server:latest": "toetje585/arch-fs25server:latest"
+    },
+    "file_denylist": [],
+    "startup": "bash /home/container/scripts/bootstrap.sh",
+    "config": {
+        "files": "{}",
+        "startup": "{\n    \"done\": \"FS25_HEALTHCHECK=PASS\"\n}",
+        "logs": "{}",
+        "stop": "^C"
+    },
+    "scripts": {
+        "installation": {
+            "script": "#!/bin/bash\n# Farming Simulator 25 install bootstrap for Pterodactyl\n# Server files live under /mnt/server (mounted to /home/container at runtime)\n\nset -euo pipefail\n\napt-get update -y\napt-get install -y --no-install-recommends ca-certificates curl unzip\nrm -rf /var/lib/apt/lists/*\n\nBASE_DIR=\"/mnt/server\"\nSCRIPT_DIR=\"${BASE_DIR}/scripts\"\nDATA_ROOT=\"${BASE_DIR}/fs-data\"\nLOG_DIR=\"${BASE_DIR}/logs\"\n\nmkdir -p \"${SCRIPT_DIR}\" \"${DATA_ROOT}\" \"${LOG_DIR}\"\n\nfor path in config game dlc installer backups; do\n    mkdir -p \"${DATA_ROOT}/${path}\"\ndone\n\ncat <<'MEDIA' > \"${BASE_DIR}/FS25_MEDIA_README.txt\"\n===================================================================================================\nFarming Simulator 25 media checklist\n===================================================================================================\n1. Log into https://eshop.giants-software.com/profile/downloads using the account that owns your FS25 \n   dedicated server license.\n2. Download the official installer (FarmingSimulator2025.exe) and any DLC/expansion executables.\n3. Upload the base installer into /home/container/fs-data/installer/ via the Pterodactyl file manager or SFTP.\n4. Upload each DLC executable into /home/container/fs-data/dlc/.\n5. Restart the server. The container will automatically pick them up and run the setup script.\n\nYou can import this egg and boot the server before the downloads finish. The VNC desktop will simply show a\n\"media pending\" notice until the files arrive.\n===================================================================================================\nMEDIA\n\n# Bootstrap runtime script that prepares the Arch container before invoking the upstream entrypoint\ncat <<'BOOTSTRAP' > \"${SCRIPT_DIR}/bootstrap.sh\"\n#!/bin/bash\nset -euo pipefail\n\nlog() {\n    echo \"[fs25-bootstrap] $*\"\n}\n\nDATA_ROOT=\"/home/container/fs-data\"\nSCRIPT_DIR=\"/home/container/scripts\"\nMEDIA_README=\"/home/container/FS25_MEDIA_README.txt\"\nWEB_PORT=\"${WEB_PORT:-8443}\"\nWEB_SCHEME=\"${WEB_SCHEME:-http}\"\nGAME_PORT=\"${SERVER_PORT:-10823}\"\nHEALTH_LOG=\"/home/container/logs/healthcheck.log\"\nHEALTH_FLAG=\"/tmp/fs25_health_ready\"\nINSTALLER_GLOB=\"${DATA_ROOT}/installer/FarmingSimulator2025*.exe\"\n\nmkdir -p \"${DATA_ROOT}\" \"${SCRIPT_DIR}\" \"$(dirname \"${HEALTH_LOG}\")\"\nfor path in config game dlc installer backups; do\n    mkdir -p \"${DATA_ROOT}/${path}\"\ndone\n\n# Keep /opt/fs25 pointed at our persistent data tree so the upstream scripts keep working\nensure_opt_mount() {\n    local target=\"/opt/fs25\"\n    if [[ -L \"${target}\" ]]; then\n        local current\n        current=$(readlink \"${target}\")\n        if [[ \"${current}\" == \"${DATA_ROOT}\" ]]; then\n            return\n        fi\n        rm -f \"${target}\"\n    elif [[ -e \"${target}\" ]]; then\n        if [[ -d \"${target}\" ]]; then\n            log \"Found physical directory at ${target}, migrating contents into persistent tree\"\n            cp -a \"${target}/.\" \"${DATA_ROOT}/\"\n        fi\n        rm -rf \"${target}\"\n    fi\n    ln -s \"${DATA_ROOT}\" \"${target}\"\n}\n\npatch_port_in_file() {\n    local file=\"$1\"\n    local port=\"$2\"\n    [[ -f \"${file}\" ]] || return 0\n    if grep -q '<webserver port=\"' \"${file}\"; then\n        sed -i \"s/<webserver port=\\\"[0-9][0-9]*\\\"/<webserver port=\\\"${port}\\\"/\" \"${file}\"\n    fi\n}\n\npatch_web_shortcut() {\n    local shortcut=\"/home/nobody/Desktop/Webpanel.desktop\"\n    [[ -f \"${shortcut}\" ]] || return 0\n    sed -i \"s#http://0.0.0.0:[0-9][0-9]*#http://0.0.0.0:${WEB_PORT}#\" \"${shortcut}\"\n}\n\nsummarise_media_state() {\n    if ls ${INSTALLER_GLOB} >/dev/null 2>&1; then\n        rm -f \"${DATA_ROOT}/.media_pending\"\n        log \"Installer detected. Ready for setup.\"\n    else\n        printf \"WARNING: FarmingSimulator2025.exe not found. Upload it to %s/installer/.\\n\" \"${DATA_ROOT}\">\"${DATA_ROOT}/.media_pending\"\n        log \"Installer missing - server will stay in media-pending mode until it is uploaded.\"\n    fi\n}\n\nstart_health_monitor() {\n    if [[ -x \"${SCRIPT_DIR}/healthcheck.sh\" ]]; then\n        nohup bash \"${SCRIPT_DIR}/healthcheck.sh\" >\"${HEALTH_LOG}\" 2>&1 &\n        log \"Health monitor started (PID $!). Logs: ${HEALTH_LOG}\"\n    else\n        log \"healthcheck.sh missing or not executable\"\n    fi\n}\n\napply_web_port_overrides() {\n    local template=\"/home/nobody/.build/fs25/default_dedicatedServer.xml\"\n    patch_port_in_file \"${template}\" \"${WEB_PORT}\"\n\n    if [[ -d \"/home/nobody/.fs25server\" ]]; then\n        while IFS= read -r -d '' file; do\n            patch_port_in_file \"${file}\" \"${WEB_PORT}\"\n        done < <(find /home/nobody/.fs25server -type f -name 'dedicatedServer*.xml' -print0)\n    fi\n\n    patch_web_shortcut\n}\n\nmain() {\n    log \"Starting bootstrap\"\n    ensure_opt_mount\n    summarise_media_state\n    apply_web_port_overrides\n    start_health_monitor\n    log \"Handing off to upstream start script\"\n    exec /usr/local/bin/start.sh\n}\n\nmain \"$@\"\nBOOTSTRAP\nchmod +x \"${SCRIPT_DIR}/bootstrap.sh\"\n\n# Lightweight health check helper that keeps Wings informed about service status\ncat <<'HEALTH' > \"${SCRIPT_DIR}/healthcheck.sh\"\n#!/bin/bash\nset -euo pipefail\n\nWEB_PORT=\"${WEB_PORT:-8443}\"\nWEB_SCHEME=\"${WEB_SCHEME:-http}\"\nGAME_PORT=\"${SERVER_PORT:-10823}\"\nANNOUNCED=0\nLAST_STATE=\"unknown\"\nFLAG=\"/tmp/fs25_health_ready\"\nLOG_PREFIX=\"[fs25-healthcheck]\"\n\ncheck_ports() {\n    local web_ok=1\n    local game_ok=1\n\n    if ! curl -ks --max-time 5 \"${WEB_SCHEME}://127.0.0.1:${WEB_PORT}/\" >/dev/null; then\n        web_ok=0\n    fi\n\n    if ! ss -lntu | grep -q \":${GAME_PORT} \"; then\n        game_ok=0\n    fi\n\n    if [[ ${web_ok} -eq 1 && ${game_ok} -eq 1 ]]; then\n        echo \"ready\"\n    else\n        echo \"pending\"\n    fi\n}\n\nwhile true; do\n    state=$(check_ports)\n    if [[ \"${state}\" != \"${LAST_STATE}\" ]]; then\n        echo \"${LOG_PREFIX} state=${state}\"\n        LAST_STATE=\"${state}\"\n    fi\n\n    if [[ \"${state}\" == \"ready\" ]]; then\n        if [[ ${ANNOUNCED} -eq 0 ]]; then\n            echo \"FS25_HEALTHCHECK=PASS $(date -Is)\"\n            ANNOUNCED=1\n            touch \"${FLAG}\"\n        fi\n    else\n        ANNOUNCED=0\n        rm -f \"${FLAG}\"\n    fi\n\n    sleep 30\ndone\nHEALTH\nchmod +x \"${SCRIPT_DIR}/healthcheck.sh\"\n\necho \"Install bootstrap complete\"\n",
+            "container": "ghcr.io/pterodactyl/installers:debian",
+            "entrypoint": "bash"
+        }
+    },
+    "variables": [
+        {
+            "name": "Container PUID",
+            "description": "UID that the Arch container should drop to (matches your Wings file owner).",
+            "env_variable": "PUID",
+            "default_value": "1000",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|numeric",
+            "field_type": "text"
+        },
+        {
+            "name": "Container PGID",
+            "description": "GID that owns the FS25 files on disk.",
+            "env_variable": "PGID",
+            "default_value": "1000",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|numeric",
+            "field_type": "text"
+        },
+        {
+            "name": "VNC Password",
+            "description": "Password required to access the TigerVNC session (min 6 chars).",
+            "env_variable": "VNC_PASSWORD",
+            "default_value": "fs25server",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|string|min:6",
+            "field_type": "text"
+        },
+        {
+            "name": "Web Admin Username",
+            "description": "Initial username for the dedicated server web portal.",
+            "env_variable": "WEB_USERNAME",
+            "default_value": "admin",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|string",
+            "field_type": "text"
+        },
+        {
+            "name": "Web Admin Password",
+            "description": "Initial password for the dedicated server web portal.",
+            "env_variable": "WEB_PASSWORD",
+            "default_value": "webpassword",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|string|min:6",
+            "field_type": "text"
+        },
+        {
+            "name": "Web Portal Port",
+            "description": "Port exposed for the FS25 web UI (use a Cloudflare orange-cloud supported port).",
+            "env_variable": "WEB_PORT",
+            "default_value": "8443",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|numeric|min:1024|max:65535",
+            "field_type": "text"
+        },
+        {
+            "name": "Web Portal Scheme",
+            "description": "Scheme expected by the health check (FS25 only serves HTTP; use Cloudflare/SSL offload for HTTPS).",
+            "env_variable": "WEB_SCHEME",
+            "default_value": "http",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|string|in:http",
+            "field_type": "text"
+        },
+        {
+            "name": "Portal Login Logo",
+            "description": "Filename under /home/container/fs-data/media/ to use for the login logo (e.g. mylogo.png).",
+            "env_variable": "WEB_PORTAL_LOGIN_LOGO",
+            "default_value": "",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "nullable|string",
+            "field_type": "text"
+        },
+        {
+            "name": "Portal Footer Logo",
+            "description": "Optional footer logo filename under /home/container/fs-data/media/. Leave blank to reuse the login logo.",
+            "env_variable": "WEB_PORTAL_FOOTER_LOGO",
+            "default_value": "",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "nullable|string",
+            "field_type": "text"
+        },
+        {
+            "name": "Enable VNC Desktop",
+            "description": "Launch the TigerVNC/NoVNC desktop (set to no once the server is fully configured).",
+            "env_variable": "ENABLE_VNC",
+            "default_value": "yes",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|string|in:yes,no",
+            "field_type": "text"
+        },
+        {
+            "name": "Auto-start Dedicated Server",
+            "description": "Automatically launch the Giants dedicated server UI when the container boots (yes/no).",
+            "env_variable": "AUTO_START_FS25",
+            "default_value": "no",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|string|in:yes,no",
+            "field_type": "text"
+        }
+    ]
+}
