@@ -58,6 +58,9 @@ Expose 10823 as your primary allocation and forward 8443 through your proxy/CDN 
 ## Support
 Need help, runbooks, or a tweak for a different distro? Open an issue with your panel version, Wings build, and recent console logs so maintainers can reproduce the environment quickly.
 
+## Legal Disclaimer
+This Docker container is not endorsed by, directly affiliated with, maintained, authorized, or sponsored by [GIANTS Software](https://www.giants-software.com) or the [Farming Simulator 25](https://www.farming-simulator.com) franchise. The Farming Simulator name and logo are © 2025 GIANTS Software, and the Farming Simulator 25 logo is © 2025 GIANTS Software.
+
 ## Additional Resources
 - Farming Simulator franchise: https://www.farming-simulator.com
 - GIANTS Software support: https://www.giants-software.com

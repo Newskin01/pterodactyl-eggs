@@ -30,8 +30,5 @@ If you run into issues, open an issue with your panel version, Wings build, and 
 - Arch FS25 container source: https://github.com/Newskin01/arch-fs25server
 - Prebuilt container image: `ghcr.io/newskin01/arch-fs25server:latest`
 
-## Legal Disclaimer
-This Docker container is not endorsed by, directly affiliated with, maintained, authorized, or sponsored by [GIANTS Software](https://www.giants-software.com) or the [Farming Simulator 25](https://www.farming-simulator.com) franchise. The Farming Simulator name and logo are © 2025 GIANTS Software, and the Farming Simulator 25 logo is © 2025 GIANTS Software.
-
 ## License
 Unless noted otherwise inside a specific egg folder, all content in this repository is released under the MIT License (see [LICENSE](LICENSE)). Feel free to reuse or adapt the scripts for your own panels, but double-check any bundled third-party assets for their respective terms.
