@@ -22,3 +22,6 @@ Install scripts are self-contained and run directly inside `/home/container`, so
 
 ## Help
 If you run into issues, open an issue with your panel version, Wings build, and egg commit hash (`git rev-parse --short HEAD`). That context makes reproducing bugs much faster.
+
+## License
+Unless noted otherwise inside a specific egg folder, all content in this repository is released under the MIT License (see `LICENSE`). Feel free to reuse or adapt the scripts for your own panels, but double-check any bundled third-party assets for their respective terms.
